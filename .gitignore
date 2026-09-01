@@ -1,0 +1,15 @@
+# Dati generati dallo scraping (pesanti, locali, non da versionare)
+data/*.db
+*.log
+crests/
+photos/
+flags/
+
+# Ambiente Python
+venv/
+__pycache__/
+*.pyc
+
+# Editor
+.vscode/
+.idea/
