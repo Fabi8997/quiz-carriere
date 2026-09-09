@@ -1,15 +1,48 @@
-# Dati generati dallo scraping (pesanti, locali, non da versionare)
+# ── Dati locali (non da versionare) ──────────────────────────────────────────
 data/*.db
-*.log
-crests/
-photos/
-flags/
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm
+data/assets/
 
-# Ambiente Python
+# ── Variabili d'ambiente (MAI su Git) ────────────────────────────────────────
+# I file .env.*.example SONO committati (template senza segreti)
+# I file .env reali NON lo sono mai
+.env
+.env.local
+.env.production
+.env.development
+api/.env
+api/.env.production
+api/.env.development
+frontend/.env
+frontend/.env.local
+frontend/.env.production
+frontend/.env.development
+
+# ── Log ───────────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── Ambiente Python ───────────────────────────────────────────────────────────
 venv/
+.venv/
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
 
-# Editor
+# ── Frontend build ────────────────────────────────────────────────────────────
+frontend/dist/
+frontend/node_modules/
+
+# ── Editor ────────────────────────────────────────────────────────────────────
 .vscode/
 .idea/
+*.swp
+*.swo
+.DS_Store

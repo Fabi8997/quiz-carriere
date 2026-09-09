@@ -25,6 +25,8 @@ from datetime import datetime
 from curl_cffi import requests as cf_requests
 from bs4 import BeautifulSoup
 
+from db_v2 import init_db
+
 BASE_URL = "https://www.transfermarkt.it"
 
 parser = argparse.ArgumentParser(description="Risoluzione nomi club mancanti")
@@ -83,15 +85,12 @@ def resolve_one(session, club_id, attempt=0):
 
 
 def main():
-    conn = sqlite3.connect(args.db)
+    conn = init_db(args.db)
     cur = conn.cursor()
 
-    # Trova i club con nome placeholder (quelli non risolti dal run principale)
-    # NOTA: usiamo un confronto ESATTO (name = 'Club ' || id), non LIKE 'Club %',
-    # perché molti club veri (sudamericani/messicani) si chiamano legittimamente
-    # "Club Nacional", "Club Atlético X", ecc. — LIKE 'Club %' li ributta dentro
-    # come falsi positivi ad ogni run successivo.
-    cur.execute("SELECT id, name FROM clubs WHERE name = 'Club ' || id")
+    # Confronto ESATTO su tm_id (non LIKE 'Club %'): molti club veri si chiamano
+    # legittimamente "Club Nacional", "Club Atlético X", ecc.
+    cur.execute("SELECT id, tm_id, name FROM clubs WHERE name = 'Club ' || tm_id")
     missing = cur.fetchall()
     logger.info(f"Club da risolvere: {len(missing)}")
 
@@ -104,21 +103,24 @@ def main():
     still_failed = 0
     t_start = time.time()
 
-    for i, (club_id, old_name) in enumerate(missing, 1):
+    for i, (internal_id, tm_id, old_name) in enumerate(missing, 1):
         if i % args.session_refresh_every == 0:
             session = new_session()
             logger.info(f"  [sessione rinnovata dopo {i} richieste]")
 
-        name, status = resolve_one(session, club_id)
+        name, status = resolve_one(session, tm_id)
 
         if name:
-            cur.execute("UPDATE clubs SET name = ? WHERE id = ?", (name, club_id))
+            cur.execute(
+                "UPDATE clubs SET name = ?, updated_at = datetime('now') WHERE id = ?",
+                (name, internal_id),
+            )
             conn.commit()
             resolved += 1
-            logger.info(f"[{i}/{len(missing)}] OK club {club_id} -> '{name}'")
+            logger.info(f"[{i}/{len(missing)}] OK club tm_id={tm_id} -> '{name}'")
         else:
             still_failed += 1
-            logger.warning(f"[{i}/{len(missing)}] FALLITO club {club_id} (status {status}), resta placeholder")
+            logger.warning(f"[{i}/{len(missing)}] FALLITO club tm_id={tm_id} (status {status}), resta placeholder")
 
         if i % 10 == 0:
             elapsed = time.time() - t_start

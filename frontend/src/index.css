@@ -1,0 +1,74 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Font ────────────────────────────────────────────────────────────────────*/
+@layer base {
+  html {
+    font-family: "Nunito", system-ui, sans-serif;
+    scroll-behavior: smooth;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body {
+    background-color: #fffdf5;
+    color: #1a2e18;
+  }
+
+  /* Grain texture — paper-like quality, 3% opacity con multiply */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23n)'/%3E%3C/svg%3E");
+    opacity: 0.032;
+    pointer-events: none;
+    z-index: 9998;
+    mix-blend-mode: multiply;
+  }
+}
+
+/* ── Focus ring organico ─────────────────────────────────────────────────────*/
+@layer base {
+  input:focus-visible,
+  button:focus-visible,
+  select:focus-visible {
+    outline: 2px solid rgba(45, 90, 39, 0.5);
+    outline-offset: 2px;
+  }
+}
+
+/* ── Animazioni ──────────────────────────────────────────────────────────────*/
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes slide-up {
+  from { transform: translateY(100%); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+@keyframes blob-drift {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33%       { transform: translate(8px, -12px) scale(1.04); }
+  66%       { transform: translate(-6px, 6px) scale(0.97); }
+}
+
+.animate-in { animation-fill-mode: both; }
+.fade-in    { animation: fade-in 220ms ease-out; }
+.slide-in-from-bottom { animation: slide-up 320ms cubic-bezier(0.16, 1, 0.3, 1); }
+
+/* Blob animate — lento e organico */
+.blob-drift {
+  animation: blob-drift 8s ease-in-out infinite;
+}
+.blob-drift-slow {
+  animation: blob-drift 12s ease-in-out infinite reverse;
+}
+
+/* ── Typography utility ──────────────────────────────────────────────────────*/
+.font-display { font-family: "Fraunces", Georgia, serif; }
+
+/* Tabella numeri allineati */
+.tabular-nums { font-variant-numeric: tabular-nums; }

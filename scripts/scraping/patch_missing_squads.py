@@ -18,9 +18,13 @@ from collections import defaultdict
 from curl_cffi import requests as cf_requests
 from bs4 import BeautifulSoup
 
+from db_v2 import (
+    init_db, get_or_create_player, get_or_create_club,
+    get_tm_source_id, normalize_name, CREST_URL_PATTERN,
+)
+
 BASE_URL = "https://www.transfermarkt.it"
 API_BASE = "https://tmapi.transfermarkt.technology"
-CREST_URL_PATTERN = "https://img.a.transfermarkt.technology/wappen/homepageWappen150x150/{club_id}.png?lm=4711"
 
 # Le squadre/stagioni note per essere fallite con 502 nel run principale.
 # Se ne trovi altre nel tuo log, aggiungile qui come (slug, nome_visualizzato, stagione).
@@ -73,12 +77,6 @@ def retry_get(session, url, headers, max_retries=5, base_delay=5):
         time.sleep(base_delay * attempt)
     return None
 
-
-def normalize_name(name: str) -> str:
-    import unicodedata
-    nfkd = unicodedata.normalize("NFKD", name)
-    only_ascii = "".join(c for c in nfkd if not unicodedata.combining(c))
-    return re.sub(r"[^a-z0-9]", "", only_ascii.lower())
 
 
 def find_team_id(session, season, target_slug):
@@ -164,14 +162,16 @@ def resolve_club_name(session, club_id, cache):
 
 
 def main():
-    conn = sqlite3.connect(args.db)
+    conn = init_db(args.db)
     cur = conn.cursor()
+    source_id = get_tm_source_id(conn)
 
-    # Pre-carica cache nomi club esistenti (evita richieste inutili)
-    cur.execute("SELECT id, name FROM clubs")
+    # Cache nomi club (chiave = tm_id, per lookup durante scraping)
+    cur.execute("SELECT tm_id, name FROM clubs")
     club_name_cache = {row[0]: row[1] for row in cur.fetchall()}
 
-    cur.execute("SELECT id FROM players")
+    # Set tm_id giocatori già presenti (per evitare chiamate API duplicate)
+    cur.execute("SELECT tm_id FROM players")
     existing_player_ids = {row[0] for row in cur.fetchall()}
     logger.info(f"Giocatori già presenti nel DB: {len(existing_player_ids)}")
     logger.info(f"Club già noti in cache: {len(club_name_cache)}")
@@ -201,36 +201,33 @@ def main():
             logger.info("  Nessun giocatore nuovo da aggiungere, la rosa era già coperta da altre stagioni.")
             continue
 
-        for i, (p_id, p_name) in enumerate(new_players, 1):
-            logger.info(f"  [{i}/{len(new_players)}] Recupero carriera di {p_name} ({p_id})...")
-            perf_data = get_player_performance(session, p_id)
+        for i, (tm_player_id, p_name) in enumerate(new_players, 1):
+            logger.info(f"  [{i}/{len(new_players)}] Recupero carriera di {p_name} (tm_id={tm_player_id})...")
+            perf_data = get_player_performance(session, tm_player_id)
             if not perf_data:
                 logger.warning(f"    Fallito recupero carriera per {p_name}, salto.")
                 continue
 
             agg = aggregate_career(perf_data)
-            cur.execute("INSERT OR IGNORE INTO players VALUES (?, ?, ?)",
-                        (p_id, p_name, normalize_name(p_name)))
-            existing_player_ids.add(p_id)
+            player_id = get_or_create_player(conn, tm_player_id, p_name)
+            existing_player_ids.add(tm_player_id)
 
-            for (club_id, c_season), stats in agg.items():
-                c_name = resolve_club_name(session, club_id, club_name_cache)
-                crest_url = CREST_URL_PATTERN.format(club_id=club_id)
-                cur.execute("INSERT OR IGNORE INTO clubs VALUES (?, ?, ?)", (club_id, c_name, crest_url))
+            for (tm_club_id, c_season), stats in agg.items():
+                c_name = resolve_club_name(session, tm_club_id, club_name_cache)
+                crest_url = CREST_URL_PATTERN.format(club_id=tm_club_id)
+                club_id = get_or_create_club(conn, tm_club_id, c_name, crest_url)
                 cur.execute(
-                    """INSERT OR REPLACE INTO careers
-                       (player_id, club_id, season, appearances, goals, assists, competitions)
-                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                    (p_id, club_id, c_season, stats["appearances"], stats["goals"],
-                     stats["assists"], ",".join(sorted(stats["competitions"]))))
+                    """INSERT OR IGNORE INTO careers
+                       (player_id, club_id, season, appearances, goals, assists, competitions, source_id)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (player_id, club_id, c_season, stats["appearances"], stats["goals"],
+                     stats["assists"], ",".join(sorted(stats["competitions"])), source_id))
             conn.commit()
             time.sleep(random.uniform(1.0, 2.0))
 
     logger.info("\n=== COMPLETATO ===")
-    cur.execute("SELECT COUNT(*) FROM players")
-    logger.info(f"Totale giocatori nel DB ora: {cur.fetchone()[0]}")
-    cur.execute("SELECT COUNT(*) FROM careers")
-    logger.info(f"Totale righe carriera nel DB ora: {cur.fetchone()[0]}")
+    cur.execute("SELECT COUNT(*) FROM players"); logger.info(f"Totale giocatori nel DB ora: {cur.fetchone()[0]}")
+    cur.execute("SELECT COUNT(*) FROM careers"); logger.info(f"Totale righe carriera nel DB ora: {cur.fetchone()[0]}")
     conn.close()
 
 

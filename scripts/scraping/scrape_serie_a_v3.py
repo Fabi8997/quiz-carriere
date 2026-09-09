@@ -22,6 +22,11 @@ from datetime import datetime
 from curl_cffi import requests as cf_requests
 from bs4 import BeautifulSoup
 
+from db_v2 import (
+    init_db, get_or_create_player, get_or_create_club,
+    get_tm_source_id, normalize_name, CREST_URL_PATTERN,
+)
+
 BASE_URL = "https://www.transfermarkt.it"
 API_BASE = "https://tmapi.transfermarkt.technology"
 
@@ -34,7 +39,6 @@ LEAGUES = {
 }
 
 ALL_SEASONS = list(range(1986, 2026))  # 40 stagioni: 1986/87 -> 2025/26
-CREST_URL_PATTERN = "https://img.a.transfermarkt.technology/wappen/homepageWappen150x150/{club_id}.png?lm=4711"
 
 # --- Parametri da linea di comando ---
 parser = argparse.ArgumentParser(description="Scraping Transfermarkt")
@@ -131,27 +135,8 @@ def polite_sleep(a=0.3, b=1.0):
     time.sleep(random.uniform(a, b))
 
 
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute("""CREATE TABLE IF NOT EXISTS players (
-        id TEXT PRIMARY KEY, name TEXT, normalized_name TEXT)""")
-    cur.execute("""CREATE TABLE IF NOT EXISTS clubs (
-        id TEXT PRIMARY KEY, name TEXT, crest_url TEXT)""")
-    cur.execute("""CREATE TABLE IF NOT EXISTS careers (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        player_id TEXT, club_id TEXT, season INTEGER,
-        appearances INTEGER, goals INTEGER, assists INTEGER, competitions TEXT,
-        UNIQUE(player_id, club_id, season))""")
-    conn.commit()
-    return conn
-
-
-def normalize_name(name: str) -> str:
-    import unicodedata
-    nfkd = unicodedata.normalize("NFKD", name)
-    only_ascii = "".join(c for c in nfkd if not unicodedata.combining(c))
-    return re.sub(r"[^a-z0-9]", "", only_ascii.lower())
+def open_db():
+    return init_db(DB_PATH)
 
 
 def get_league_teams(session, season: int):
@@ -298,20 +283,18 @@ def process_player(p_id, p_name):
     return p_id, p_name, resolved_rows, status
 
 
-def save_player_data(conn, p_id, p_name, rows):
+def save_player_data(conn, tm_player_id, p_name, rows, source_id):
     with db_lock:
-        conn.execute("INSERT OR IGNORE INTO players VALUES (?, ?, ?)",
-                      (p_id, p_name, normalize_name(p_name)))
-        for club_id, club_name, season, stats in rows:
-            crest_url = CREST_URL_PATTERN.format(club_id=club_id)
-            conn.execute("INSERT OR IGNORE INTO clubs VALUES (?, ?, ?)",
-                          (club_id, club_name, crest_url))
+        player_id = get_or_create_player(conn, tm_player_id, p_name)
+        for tm_club_id, club_name, season, stats in rows:
+            crest_url = CREST_URL_PATTERN.format(club_id=tm_club_id)
+            club_id = get_or_create_club(conn, tm_club_id, club_name, crest_url)
             conn.execute(
-                """INSERT OR REPLACE INTO careers
-                   (player_id, club_id, season, appearances, goals, assists, competitions)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (p_id, club_id, season, stats["appearances"], stats["goals"],
-                 stats["assists"], ",".join(sorted(stats["competitions"]))))
+                """INSERT OR IGNORE INTO careers
+                   (player_id, club_id, season, appearances, goals, assists, competitions, source_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (player_id, club_id, season, stats["appearances"], stats["goals"],
+                 stats["assists"], ",".join(sorted(stats["competitions"])), source_id))
         conn.commit()
 
 
@@ -331,22 +314,23 @@ def main():
     logger.info(f"Worker paralleli: {MAX_WORKERS} | DB: {DB_PATH} | Log: {LOG_PATH}")
     logger.info(f"Verbose: {'ON (log dettagliato per ogni richiesta)' if args.verbose else 'OFF (usa --verbose per il dettaglio completo)'}")
     t_start = time.time()
-    conn = init_db()
+    conn = open_db()
     session = new_session()
+    source_id = get_tm_source_id(conn)
 
     # Pre-carica cache nomi club dal DB esistente (se stai riusando lo stesso file
     # tra leghe diverse, molti club esteri sono probabilmente già risolti)
     cur = conn.cursor()
-    cur.execute("SELECT id, name FROM clubs WHERE name != 'Club ' || id")
+    cur.execute("SELECT tm_id, name FROM clubs WHERE name != 'Club ' || tm_id")
     preloaded_clubs = cur.fetchall()
-    for club_id, name in preloaded_clubs:
+    for tm_id, name in preloaded_clubs:
         with cache_lock:
-            club_name_cache[club_id] = name
+            club_name_cache[tm_id] = name
     logger.info(f"Club già noti (riusati dal DB esistente): {len(preloaded_clubs)}")
 
     # Pre-carica giocatori già presenti: se li re-incontriamo in questa lega,
     # saltiamo la chiamata API (la loro carriera completa è già salvata)
-    cur.execute("SELECT id FROM players")
+    cur.execute("SELECT tm_id FROM players")
     already_known_players = {row[0] for row in cur.fetchall()}
     logger.info(f"Giocatori già noti (riusati dal DB esistente): {len(already_known_players)}")
 
@@ -427,7 +411,7 @@ def main():
                 errors += 1
                 logger.warning(f"  [{completed}/{len(player_items)}] ERRORE {p_name} ({p_id}): status {status}")
             else:
-                save_player_data(conn, p_id, p_name, rows)
+                save_player_data(conn, p_id, p_name, rows, source_id)
                 total_rows_saved += len(rows)
                 if args.verbose:
                     logger.debug(f"  [{completed}/{len(player_items)}] OK {p_name}: {len(rows)} righe carriera")

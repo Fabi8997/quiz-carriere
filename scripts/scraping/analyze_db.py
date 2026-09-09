@@ -31,14 +31,13 @@ def main():
     print(f"Righe carriera:    {cur.fetchone()[0]}")
 
     section("CLUB CON NOME NON RISOLTO (placeholder)")
-    cur.execute("SELECT id, name FROM clubs WHERE name = 'Club ' || id")
+    cur.execute("SELECT id, tm_id, name FROM clubs WHERE name = 'Club ' || tm_id")
     unresolved = cur.fetchall()
     print(f"Totale: {len(unresolved)}")
-    for club_id, name in unresolved[:20]:
-        # quante righe di carriera coinvolgono questo club (per capire l'impatto)
-        cur.execute("SELECT COUNT(*) FROM careers WHERE club_id = ?", (club_id,))
+    for internal_id, tm_id, name in unresolved[:20]:
+        cur.execute("SELECT COUNT(*) FROM careers WHERE club_id = ?", (internal_id,))
         n = cur.fetchone()[0]
-        print(f"  {name} -> coinvolto in {n} righe carriera")
+        print(f"  {name} (tm_id={tm_id}) -> coinvolto in {n} righe carriera")
     if len(unresolved) > 20:
         print(f"  ... e altri {len(unresolved) - 20}")
 
@@ -53,11 +52,11 @@ def main():
     for pid, name in orphans[:15]:
         print(f"  {name} ({pid})")
 
-    section("POSSIBILI DUPLICATI NOME CLUB (stesso nome, ID diversi)")
+    section("POSSIBILI DUPLICATI NOME CLUB (stesso nome, tm_id diversi)")
     cur.execute("""
-        SELECT name, COUNT(*) as n, GROUP_CONCAT(id) as ids
+        SELECT name, COUNT(*) as n, GROUP_CONCAT(tm_id) as tm_ids
         FROM clubs
-        WHERE name != 'Club ' || id
+        WHERE name != 'Club ' || tm_id
         GROUP BY name
         HAVING n > 1
         ORDER BY n DESC
@@ -65,8 +64,8 @@ def main():
     """)
     dupes = cur.fetchall()
     print(f"Nomi duplicati trovati: {len(dupes)}")
-    for name, n, ids in dupes:
-        print(f"  '{name}' -> {n} club_id diversi: {ids}")
+    for name, n, tm_ids in dupes:
+        print(f"  '{name}' -> {n} tm_id diversi: {tm_ids}")
 
     section("VALORI SOSPETTI: presenze/gol anomali in una singola stagione")
     # Una stagione ha max ~38 partite di campionato + coppe; oltre 60 è sospetto

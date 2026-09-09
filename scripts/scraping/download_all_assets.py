@@ -23,6 +23,8 @@ from datetime import datetime, timezone
 
 from curl_cffi import requests as cf_requests
 
+from db_v2 import init_db
+
 parser = argparse.ArgumentParser(description="Download unificato assets (stemmi/foto/bandiere)")
 parser.add_argument("--db", type=str, required=True)
 parser.add_argument("--out", type=str, default="assets", help="Cartella di output")
@@ -62,24 +64,6 @@ def extract_country_id(flag_url: str):
     return m.group(1) if m else None
 
 
-def init_tracking_columns(conn):
-    cur = conn.cursor()
-    cur.execute("PRAGMA table_info(players)")
-    existing = {row[1] for row in cur.fetchall()}
-    if "photo_source_ts" not in existing:
-        cur.execute("ALTER TABLE players ADD COLUMN photo_source_ts INTEGER")
-        logger.info("Aggiunta colonna players.photo_source_ts")
-    if "photo_downloaded_at" not in existing:
-        cur.execute("ALTER TABLE players ADD COLUMN photo_downloaded_at TEXT")
-        logger.info("Aggiunta colonna players.photo_downloaded_at")
-
-    cur.execute("PRAGMA table_info(clubs)")
-    existing_clubs = {row[1] for row in cur.fetchall()}
-    if "crest_downloaded_at" not in existing_clubs:
-        cur.execute("ALTER TABLE clubs ADD COLUMN crest_downloaded_at TEXT")
-        logger.info("Aggiunta colonna clubs.crest_downloaded_at")
-    conn.commit()
-
 
 def download_file(session, url, out_path):
     try:
@@ -101,8 +85,7 @@ def main():
     for d in (photos_dir, crests_dir, flags_dir):
         os.makedirs(d, exist_ok=True)
 
-    conn = sqlite3.connect(args.db)
-    init_tracking_columns(conn)
+    conn = init_db(args.db)
     cur = conn.cursor()
     session = new_session()
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -112,13 +95,13 @@ def main():
     cur.execute("SELECT id, crest_url, crest_downloaded_at FROM clubs WHERE crest_url IS NOT NULL")
     clubs = cur.fetchall()
     crest_ok, crest_skip, crest_fail = 0, 0, 0
-    for club_id, crest_url, downloaded_at in clubs:
-        out_path = os.path.join(crests_dir, f"{club_id}.png")  # nome file STABILE
+    for internal_id, crest_url, downloaded_at in clubs:
+        out_path = os.path.join(crests_dir, f"{internal_id}.png")  # usa id interno, non tm_id
         if os.path.exists(out_path) and downloaded_at:
             crest_skip += 1
             continue
         if download_file(session, crest_url, out_path):
-            cur.execute("UPDATE clubs SET crest_downloaded_at = ? WHERE id = ?", (now_iso, club_id))
+            cur.execute("UPDATE clubs SET crest_downloaded_at = ? WHERE id = ?", (now_iso, internal_id))
             crest_ok += 1
         else:
             crest_fail += 1
@@ -155,14 +138,14 @@ def main():
     cur.execute("SELECT id, photo_url, photo_source_ts FROM players WHERE photo_url IS NOT NULL")
     players = cur.fetchall()
     photo_ok, photo_skip, photo_fail = 0, 0, 0
-    for i, (player_id, photo_url, saved_ts) in enumerate(players, 1):
+    for i, (internal_id, photo_url, saved_ts) in enumerate(players, 1):
         current_ts = extract_photo_timestamp(photo_url)
-        out_path = os.path.join(photos_dir, f"{player_id}.jpg")  # nome file STABILE
+        out_path = os.path.join(photos_dir, f"{internal_id}.jpg")  # usa id interno, non tm_id
 
         needs_download = (
-            not os.path.exists(out_path)          # non l'abbiamo mai scaricata
-            or saved_ts is None                     # non abbiamo un timestamp salvato
-            or current_ts != saved_ts                # TM l'ha aggiornata
+            not os.path.exists(out_path)
+            or saved_ts is None
+            or current_ts != saved_ts
         )
         if not needs_download:
             photo_skip += 1
@@ -171,7 +154,7 @@ def main():
         if download_file(session, photo_url, out_path):
             cur.execute(
                 "UPDATE players SET photo_source_ts = ?, photo_downloaded_at = ? WHERE id = ?",
-                (current_ts, now_iso, player_id)
+                (current_ts, now_iso, internal_id)
             )
             photo_ok += 1
         else:

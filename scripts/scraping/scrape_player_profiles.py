@@ -23,6 +23,8 @@ import unicodedata
 from curl_cffi import requests as cf_requests
 from bs4 import BeautifulSoup
 
+from db_v2 import init_db
+
 BASE_URL = "https://www.transfermarkt.it"
 
 parser = argparse.ArgumentParser(description="Arricchimento profili giocatori")
@@ -141,20 +143,6 @@ def fetch_profile(session, player_id, player_name):
     return None, "max_retries_exceeded"
 
 
-def init_columns(conn):
-    cur = conn.cursor()
-    cur.execute("PRAGMA table_info(players)")
-    existing_cols = {row[1] for row in cur.fetchall()}
-    new_cols = {
-        "nationality": "TEXT", "nationality_flag_url": "TEXT",
-        "birth_date": "TEXT", "birth_place": "TEXT", "height": "TEXT",
-        "position_detailed": "TEXT", "photo_url": "TEXT",
-    }
-    for col, col_type in new_cols.items():
-        if col not in existing_cols:
-            cur.execute(f"ALTER TABLE players ADD COLUMN {col} {col_type}")
-            logger.info(f"Aggiunta colonna players.{col}")
-    conn.commit()
 
 
 def format_duration(seconds):
@@ -168,11 +156,10 @@ def format_duration(seconds):
 
 
 def main():
-    conn = sqlite3.connect(args.db)
-    init_columns(conn)
+    conn = init_db(args.db)
     cur = conn.cursor()
 
-    cur.execute("SELECT id, name FROM players WHERE nationality IS NULL")
+    cur.execute("SELECT id, tm_id, name FROM players WHERE nationality IS NULL")
     todo = cur.fetchall()
     logger.info(f"Giocatori da arricchire: {len(todo)} (quelli già fatti vengono saltati)")
 
@@ -185,26 +172,27 @@ def main():
     fail_reasons = {}
     t_start = time.time()
 
-    for i, (p_id, p_name) in enumerate(todo, 1):
+    for i, (internal_id, tm_id, p_name) in enumerate(todo, 1):
         if i % args.session_refresh_every == 0:
             session = new_session()
 
-        data, status = fetch_profile(session, p_id, p_name)
+        data, status = fetch_profile(session, tm_id, p_name)
 
         if data:
             cur.execute("""
                 UPDATE players SET nationality=?, nationality_flag_url=?, birth_date=?,
-                birth_place=?, height=?, position_detailed=?, photo_url=?
+                birth_place=?, height=?, position_detailed=?, photo_url=?,
+                updated_at=datetime('now')
                 WHERE id=?
             """, (data["nationality"], data["flag_url"], data["birth_date"],
                   data["birth_place"], data["height"], data["position_detailed"],
-                  data["photo_url"], p_id))
+                  data["photo_url"], internal_id))
             conn.commit()
             ok += 1
         else:
             failed += 1
             fail_reasons[str(status)] = fail_reasons.get(str(status), 0) + 1
-            logger.warning(f"[{i}/{len(todo)}] FALLITO {p_name} ({p_id}): {status}")
+            logger.warning(f"[{i}/{len(todo)}] FALLITO {p_name} (tm_id={tm_id}): {status}")
 
         if i % args.progress_every == 0 or i == len(todo):
             elapsed = time.time() - t_start
