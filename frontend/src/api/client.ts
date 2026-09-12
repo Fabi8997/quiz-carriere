@@ -11,17 +11,30 @@ export const client = axios.create({
 });
 
 // In dev: /assets → serviti dal backend locale via proxy Vite
-// In prod: URL Supabase Storage (es. https://xxx.supabase.co/storage/v1/object/public/assets)
-const ASSETS_URL = import.meta.env.VITE_ASSETS_BASE_URL ?? "/assets";
+// In prod: URL Supabase Storage (es. https://xxx.supabase.co/storage/v1/object/public)
+const ASSETS_URL = import.meta.env.VITE_ASSETS_BASE_URL ?? "";
+
+// In Supabase Storage, i file sono stati caricati con la struttura:
+//   bucket=photos → path photos/1.webp  → URL .../photos/photos/1.webp
+//   bucket=crests → path crests/1.webp  → URL .../crests/crests/1.webp
+// In dev, il backend locale serve direttamente /assets/photos/1.webp
+function assetUrl(type: string, file: string): string {
+  if (ASSETS_URL) {
+    // Produzione: Supabase Storage con doppio path per via dell'upload
+    return `${ASSETS_URL}/${type}/${type}/${file}`;
+  }
+  // Dev: proxy Vite → FastAPI StaticFiles
+  return `/assets/${type}/${file}`;
+}
 
 export function crestUrl(clubId: number): string {
-  return `${ASSETS_URL}/crests/${clubId}.webp`;
+  return assetUrl("crests", `${clubId}.webp`);
 }
 
 export function photoUrl(playerId: number): string {
-  return `${ASSETS_URL}/photos/${playerId}.webp`;
+  return assetUrl("photos", `${playerId}.webp`);
 }
 
 export function flagUrl(countryTmId: string): string {
-  return `${ASSETS_URL}/flags/${countryTmId}.webp`;
+  return assetUrl("flags", `${countryTmId}.webp`);
 }
