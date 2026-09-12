@@ -18,11 +18,18 @@ class Settings(BaseSettings):
     # App
     APP_ENV: str = "development"  # "production"
     DEBUG: bool = True
-    CORS_ORIGINS: list[str] = [
-        "http://localhost:3000",
-        "http://localhost:5173",
-        "http://localhost:4173",
-    ]
+
+    @property
+    def CORS_ORIGINS(self) -> list[str]:
+        """Origini CORS: sempre localhost in dev + il dominio frontend in prod."""
+        origins = [
+            "http://localhost:3000",
+            "http://localhost:5173",
+            "http://localhost:4173",
+        ]
+        if self.FRONTEND_URL and self.FRONTEND_URL not in origins:
+            origins.append(self.FRONTEND_URL)
+        return origins
 
     # Admin
     ADMIN_SECRET: str = ""  # Obbligatorio in produzione per endpoint admin
