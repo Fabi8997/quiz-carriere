@@ -1,3 +1,4 @@
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -19,17 +20,8 @@ class Settings(BaseSettings):
     APP_ENV: str = "development"  # "production"
     DEBUG: bool = True
 
-    @property
-    def CORS_ORIGINS(self) -> list[str]:
-        """Origini CORS: sempre localhost in dev + il dominio frontend in prod."""
-        origins = [
-            "http://localhost:3000",
-            "http://localhost:5173",
-            "http://localhost:4173",
-        ]
-        if self.FRONTEND_URL and self.FRONTEND_URL not in origins:
-            origins.append(self.FRONTEND_URL)
-        return origins
+    # CORS — popolato automaticamente dopo init (vedi model_validator)
+    CORS_ORIGINS: list[str] = []
 
     # Admin
     ADMIN_SECRET: str = ""  # Obbligatorio in produzione per endpoint admin
@@ -38,11 +30,23 @@ class Settings(BaseSettings):
     FRONTEND_URL: str = "http://localhost:5173"
 
     # Chiave per firmare i valori degli indizi sensibili (foto)
-    # Generare con: python -c "import secrets; print(secrets.token_hex(32))"
     HINT_SIGN_KEY: str = "dev-insecure-key-change-in-production"
 
     # Fuzzy search
     FUZZY_SCORE_THRESHOLD: int = 55
+
+    @model_validator(mode="after")
+    def _set_cors_origins(self) -> "Settings":
+        """Aggiunge localhost + FRONTEND_URL alle origini CORS consentite."""
+        origins = [
+            "http://localhost:3000",
+            "http://localhost:5173",
+            "http://localhost:4173",
+        ]
+        if self.FRONTEND_URL and self.FRONTEND_URL not in origins:
+            origins.append(self.FRONTEND_URL)
+        self.CORS_ORIGINS = origins
+        return self
 
     @property
     def is_production(self) -> bool:
