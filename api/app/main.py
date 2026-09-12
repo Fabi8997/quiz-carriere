@@ -64,9 +64,12 @@ app.add_middleware(
 )
 
 # ── Router ────────────────────────────────────────────────────────────────────
-app.include_router(game.router)
-app.include_router(search.router)
-app.include_router(challenge.router)
+# Prefisso /api su tutti i router: allinea dev e prod.
+# In dev il proxy Vite riscriveva /api/* → /* lato backend (asimmetria).
+# Ora il backend serve direttamente /api/* in entrambi gli ambienti.
+app.include_router(game.router,      prefix="/api")
+app.include_router(search.router,    prefix="/api")
+app.include_router(challenge.router, prefix="/api")
 
 # ── Asset statici (solo in sviluppo) ─────────────────────────────────────────
 if not settings.is_production:

@@ -9,7 +9,7 @@ export default defineConfig({
       // In dev, tutte le chiamate /api/* vengono proxate al backend FastAPI
       "/api": {
         target: "http://localhost:8000",
-        rewrite: (path) => path.replace(/^\/api/, ""),
+        // Nessun rewrite: il backend ora serve /api/* anche in dev
         changeOrigin: true,
       },
       // Asset statici serviti direttamente da FastAPI
