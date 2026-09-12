@@ -144,5 +144,11 @@ def get_photo(token: str, sig: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=403, detail="Firma non valida.")
 
     # Serve redirect alla risorsa asset (CDN o locale)
-    photo_url = f"{settings.ASSETS_BASE_URL}/photos/{player_id}.webp"
+    # In produzione (Supabase Storage) i file sono caricati con doppio path:
+    # bucket=photos, path=photos/{id}.webp → URL finale .../photos/photos/{id}.webp
+    # In dev ASSETS_BASE_URL è http://localhost:8000 e serve /assets/photos/{id}.webp
+    if settings.is_production:
+        photo_url = f"{settings.ASSETS_BASE_URL}/photos/photos/{player_id}.webp"
+    else:
+        photo_url = f"{settings.ASSETS_BASE_URL}/assets/photos/{player_id}.webp"
     return RedirectResponse(url=photo_url, status_code=302)
